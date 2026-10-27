@@ -64,6 +64,9 @@ export default function AiTriageOfficer({ room, presence, spatial, onNotify }) {
   // Copy SITREP report
   const copySitrep = () => {
     if (!triage) return
+    const planStr = Array.isArray(triage.extractionPlan)
+      ? triage.extractionPlan.join('\n')
+      : triage.extractionPlan || ''
     const sitrep = `=== RESQ-ATLAS EMERGENCY INCIDENT SITREP ===
 Timestamp: ${triage.timestamp || new Date().toISOString()}
 AI Engine: ${triage.aiEngine} (${triage.modelUsed})
@@ -80,7 +83,7 @@ ${triage.vitalsSummary}
 ${triage.tacticalAssessment}
 
 [FIELD EXTRACTION PLAN]
-${triage.extractionPlan}
+${planStr}
 ============================================`
 
     navigator.clipboard?.writeText(sitrep)
@@ -225,7 +228,9 @@ ${triage.extractionPlan}
           <div className="triage-detail-box full-width">
             <span className="detail-kicker">FIRST RESPONDER EXTRACTION PLAN</span>
             <p className="detail-copy plan-copy">
-              {triage?.extractionPlan || '1. Secure coordinate perimeter. 2. Establish acoustic contact. 3. Deploy extraction tools.'}
+              {Array.isArray(triage?.extractionPlan)
+                ? triage.extractionPlan.join('\n')
+                : triage?.extractionPlan || '1. Secure coordinate perimeter. 2. Establish acoustic contact. 3. Deploy extraction tools.'}
             </p>
           </div>
         </div>
