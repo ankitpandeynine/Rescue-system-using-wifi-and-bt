@@ -1,0 +1,28 @@
+{
+  "name": "resq-signal-console",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "backend": "node server/index.mjs",
+    "dev:all": "node scripts/dev-all.mjs",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:ui": "node scripts/ui-smoke.mjs",
+    "test:3d": "node scripts/verify-3d-system.mjs",
+    "test:ui:3d": "node scripts/test-3d-ui.mjs"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "three": "^0.186.1",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.1",
+    "serialport": "^13.0.0"
+  }
+}
