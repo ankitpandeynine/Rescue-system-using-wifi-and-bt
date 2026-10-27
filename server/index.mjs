@@ -955,6 +955,7 @@ function update3dDisturbance(packet) {
 // ============================================================================
 
 async function checkGemmaLocalStatus() {
+  // 1. Check Ollama (default port 11434)
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 1200)
@@ -963,15 +964,62 @@ async function checkGemmaLocalStatus() {
     if (res.ok) {
       const data = await res.json()
       const hasGemma = (data.models || []).some((m) => (m.name || '').toLowerCase().includes('gemma'))
-      return { available: true, model: hasGemma ? 'gemma2:2b' : (data.models?.[0]?.name || 'gemma2:2b') }
+      return {
+        available: true,
+        model: hasGemma ? 'gemma2:2b' : (data.models?.[0]?.name || 'gemma2:2b'),
+        provider: 'ollama',
+        port: 11434,
+      }
     }
   } catch {}
-  return { available: false, model: 'gemma2:2b (offline)' }
+
+  // 2. Check LM Studio / OpenAI-compatible local edge port (port 1234)
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 1200)
+    const res = await fetch('http://127.0.0.1:1234/v1/models', { signal: controller.signal })
+    clearTimeout(timer)
+    if (res.ok) {
+      const data = await res.json()
+      const models = data.data || []
+      const gemmaModel = models.find((m) => (m.id || '').toLowerCase().includes('gemma'))
+      const chosen = gemmaModel ? gemmaModel.id : (models[0]?.id || 'local-edge-model')
+      return {
+        available: true,
+        model: chosen,
+        provider: 'lmstudio',
+        port: 1234,
+      }
+    }
+  } catch {}
+
+  return { available: false, model: 'gemma2:2b (offline)', provider: 'none', port: 11434 }
 }
 
 async function runGemmaInference(prompt, model = 'gemma2:2b') {
+  const status = await checkGemmaLocalStatus()
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 10000)
+  const timer = setTimeout(() => controller.abort(), 15000)
+
+  // Route to LM Studio if active on 1234
+  if (status.provider === 'lmstudio') {
+    const res = await fetch('http://127.0.0.1:1234/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: status.model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+      }),
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+    if (!res.ok) throw new Error(`LM Studio HTTP ${res.status}`)
+    const data = await res.json()
+    return data.choices?.[0]?.message?.content || ''
+  }
+
+  // Route to Ollama on 11434
   const res = await fetch('http://127.0.0.1:11434/api/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2324,23 +2372,24 @@ Output only valid JSON.`
 
     let result = null
 
-    // 1. Try Gemma 4-bit local (Ollama)
+    // 1. Try Gemma 4-bit local (Ollama or LM Studio)
     if (requestedEngine === 'gemma' || requestedEngine === 'auto') {
       try {
-        const raw = await runGemmaInference(prompt, 'gemma2:2b')
+        const status = await checkGemmaLocalStatus()
+        const raw = await runGemmaInference(prompt, status.model || 'gemma2:2b')
         const jsonMatch = raw.match(/\{[\s\S]*\}/)
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0])
           result = {
             ...deterministic,
             ...parsed,
-            aiEngine: 'Gemma 4-bit (Offline Edge SAR)',
-            modelUsed: 'gemma2:2b (Ollama local port 11434)',
+            aiEngine: status.provider === 'lmstudio' ? 'Local Edge SAR AI (LM Studio)' : 'Gemma 4-bit (Offline Edge SAR)',
+            modelUsed: `${status.model} (local port ${status.port})`,
             timestamp: nowIso(),
           }
         }
       } catch (err) {
-        // Gemma offline not reachable; fall through
+        // Local offline not reachable; fall through
       }
     }
 
