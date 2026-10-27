@@ -11,6 +11,7 @@ import {
   BookOpen,
   Box,
   Boxes,
+  Brain,
   Check,
   ChevronDown,
   CircleHelp,
@@ -44,10 +45,12 @@ import {
 } from 'lucide-react'
 import './styles.css'
 import ThreeDimensionalView from './ThreeDimensionalView.jsx'
+import AiTriageOfficer from './AiTriageOfficer.jsx'
 
 const navItems = [
   { label: 'Live overview', icon: Activity },
   { label: '3D Scan & Spectral', icon: Boxes },
+  { label: 'AI Triage Officer', icon: Brain },
   { label: 'Spatial view', icon: MapPinned },
   { label: 'Sensor fleet', icon: Antenna },
   { label: 'Recordings', icon: Archive },
@@ -624,6 +627,14 @@ function App() {
                 />
               </section>
 
+              {/* Gemma 4-Bit & Google AI Studio Triage Officer Panel */}
+              <AiTriageOfficer
+                room={room}
+                presence={presence}
+                spatial={spatial}
+                onNotify={notify}
+              />
+
               {/* Main Content: Spatial Room Radar (Left) + Side Telemetry (Right) */}
               <section className="content-grid">
                 <div className="map-panel panel">
@@ -1075,6 +1086,19 @@ function WorkspacePage({ page, room, presence, spatial, liveHealth, liveMeasurem
         liveMeasurement={liveMeasurement}
         onNotify={onNotify}
       />
+    )
+  }
+
+  if (page === 'AI Triage Officer') {
+    return (
+      <div style={{ padding: '0 0 24px 0' }}>
+        <AiTriageOfficer
+          room={room}
+          presence={presence}
+          spatial={spatial}
+          onNotify={onNotify}
+        />
+      </div>
     )
   }
 

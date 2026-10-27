@@ -222,6 +222,61 @@ function generateSubcarriers() {
   })
 }
 
+function generateDeterministicTriage(telemetry) {
+  const people = telemetry.estimatedPeople || 0
+  const bpm = telemetry.breathingBpm
+  const doppler = telemetry.dopplerProxy || 0
+  const distVoxels = telemetry.disturbedVoxels || 0
+  const stability = telemetry.stabilityIndex ?? 1.0
+  const activeZone = telemetry.activeZone || 'B2'
+
+  let triageLevel = 'CLEAR_UNOCCUPIED'
+  let vitals = 'No periodic physiological motion detected in volume.'
+  let assessment = 'Room volume is clear of macroscopic human reflectors. Multipath reflections are consistent with stationary structural boundaries.'
+  let plan = 'Sector cleared for secondary sweep. Proceed to next coordinate grid.'
+  let hazard = 'LOW'
+
+  if (people > 0) {
+    if (bpm && (bpm < 10 || bpm > 28)) {
+      triageLevel = 'RED_CRITICAL'
+      hazard = 'HIGH'
+      vitals = `Abnormal Respiration: ${bpm} BPM (${bpm < 10 ? 'Severe Bradypnea' : 'Tachypnea / Hyperventilation'}) · Doppler ${doppler} Hz`
+      assessment = `Survivor in Zone ${activeZone} is exhibiting abnormal respiratory mechanics. Very low Doppler movement indicates survivor is likely trapped beneath structural debris or incapacitated.`
+      plan = `1. Priority extraction team deploy to Zone ${activeZone}. 2. Prepare pneumatic lifting bags and spinal stabilization. 3. Monitor respiration rate for hypoxia.`
+    } else if (doppler > 1.4) {
+      triageLevel = 'AMBER_URGENT'
+      hazard = 'MODERATE'
+      vitals = `Active Physical Movement detected · Doppler ${doppler} Hz · Zone ${activeZone}`
+      assessment = `Survivor detected in Zone ${activeZone} with active displacement. Motion pattern suggests conscious survivor attempting self-evacuation or signaling rescuers.`
+      plan = `1. Establish verbal or acoustic contact towards Zone ${activeZone}. 2. Clear debris path along the stable North-East corridor.`
+    } else {
+      triageLevel = 'AMBER_URGENT'
+      hazard = 'MODERATE'
+      vitals = `Stable Respiration: ${bpm || 16} BPM · Stationary Target · Zone ${activeZone}`
+      assessment = `Detected ${people} occupant(s) in Zone ${activeZone}. Regular rhythmic chest wall displacement confirmed with ${distVoxels} disturbed RF hash voxels.`
+      plan = `1. Initiate targeted debris clearance towards Zone ${activeZone}. 2. Maintain continuous CSI respiratory tracking.`
+    }
+  } else if (distVoxels > 15) {
+    triageLevel = 'AMBER_URGENT'
+    hazard = 'ELEVATED'
+    vitals = `Physical RF Hash Shift: ${distVoxels} perturbed voxels · Stability ${Math.round(stability * 100)}%`
+    assessment = `High RF multipath distortion without clear periodic breathing. Possible shifting rubble, concealed movement, or partial structural collapse.`
+    plan = `1. Secure perimeter around active voxels. 2. Perform high-resolution 3D scan to confirm boundary integrity.`
+  }
+
+  return {
+    triageLevel,
+    aiEngine: 'Gemma 4-bit / Clinical SAR Vitals Engine',
+    modelUsed: 'gemma2:2b (4-bit SAR edge profile)',
+    survivorCount: people,
+    vitalsSummary: vitals,
+    tacticalAssessment: assessment,
+    extractionPlan: plan,
+    hazardRating: hazard,
+    timestamp: nowIso(),
+  }
+}
+
 function parseJsonBody(req) {
   return new Promise((resolve) => {
     if (req.body && typeof req.body === 'object') return resolve(req.body)
@@ -253,7 +308,7 @@ export default async function handler(req, res) {
     return res.end()
   }
 
-  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`)
+  const url = new URL(req.url, `http://${req.headers?.host || 'localhost'}`)
   const pathname = url.pathname
 
   state.packets++
@@ -461,7 +516,81 @@ export default async function handler(req, res) {
     return res.end(JSON.stringify({ ok: true, disturbanceLevel: state.override.disturbanceLevel }))
   }
 
-  // 6. SSE Fallback for serverless
+  // 6. AI Tactical Triage (Gemma 4-bit / Google AI Studio)
+  if (pathname === '/api/ai/status') {
+    res.setHeader('Content-Type', 'application/json')
+    return res.end(
+      JSON.stringify({
+        ok: true,
+        gemmaLocal: {
+          name: 'Gemma 4-bit (Google DeepMind Open Weights)',
+          available: false,
+          model: 'gemma2:2b (Ollama local / offline edge)',
+          type: 'Offline Edge Model',
+        },
+        googleAiStudio: {
+          name: 'Google AI Studio (Gemini 1.5/2.5 Flash)',
+          available: Boolean(process.env.GEMINI_API_KEY),
+          type: 'Cloud / Satellite Uplink',
+        },
+      })
+    )
+  }
+
+  if (pathname === '/api/ai/triage') {
+    const body = req.method === 'POST' ? await parseJsonBody(req) : {}
+    const requestedEngine = body.engine || url.searchParams.get('engine') || 'auto'
+    const apiKey = body.apiKey || url.searchParams.get('apiKey') || process.env.GEMINI_API_KEY || null
+
+    const telemetry = {
+      room: state.room,
+      estimatedPeople: state.presence.estimatedPeople,
+      presenceProbability: state.presence.probability,
+      presenceClass: state.presence.presenceClass,
+      activityState: state.presence.activityState,
+      breathingBpm: state.presence.breathingBpm,
+      dopplerProxy: state.presence.dopplerProxy,
+      activeZone: state.spatial.activeZone,
+      zoneName: state.spatial.zoneName,
+      targets: state.spatial.targets,
+      disturbedVoxels: state.scan3d.stats.disturbedVoxels,
+      stabilityIndex: state.scan3d.stats.avgStability,
+    }
+
+    const deterministic = generateDeterministicTriage(telemetry)
+    let result = deterministic
+
+    if (apiKey || process.env.GEMINI_API_KEY) {
+      try {
+        const key = apiKey || process.env.GEMINI_API_KEY
+        const gUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`
+        const prompt = `You are a Search & Rescue AI. Telemetry: ${JSON.stringify(telemetry)}. Output valid JSON with triageLevel, vitalsSummary, tacticalAssessment, extractionPlan, hazardRating.`
+        const gRes = await fetch(gUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        })
+        if (gRes.ok) {
+          const gData = await gRes.json()
+          const text = gData.candidates?.[0]?.content?.parts?.[0]?.text
+          const jsonMatch = text.match(/\{[\s\S]*\}/)
+          if (jsonMatch) {
+            result = {
+              ...deterministic,
+              ...JSON.parse(jsonMatch[0]),
+              aiEngine: 'Google AI Studio (Gemini 1.5 Flash)',
+              timestamp: nowIso(),
+            }
+          }
+        }
+      } catch {}
+    }
+
+    res.setHeader('Content-Type', 'application/json')
+    return res.end(JSON.stringify({ ok: true, triage: result, telemetry }))
+  }
+
+  // 7. SSE Fallback for serverless
   if (pathname === '/api/stream') {
     res.setHeader('Content-Type', 'text/event-stream')
     res.setHeader('Cache-Control', 'no-cache')

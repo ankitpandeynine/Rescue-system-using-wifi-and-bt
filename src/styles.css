@@ -578,3 +578,315 @@ button:focus-visible { outline: 2px solid var(--lime); outline-offset: 3px; }
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+
+/* ==========================================================
+   AI TACTICAL INCIDENT OFFICER (GEMMA & GOOGLE AI STUDIO)
+   ========================================================== */
+.ai-triage-panel {
+  margin-bottom: 20px;
+  background: #111713;
+  border: 1px solid #233428;
+  border-radius: 8px;
+  overflow: hidden;
+  transition: border-color 300ms ease, box-shadow 300ms ease;
+}
+
+.ai-triage-panel.red {
+  border-color: rgba(238, 125, 120, 0.6);
+  box-shadow: 0 0 25px rgba(238, 125, 120, 0.12);
+}
+
+.ai-triage-panel.amber {
+  border-color: rgba(242, 191, 107, 0.5);
+  box-shadow: 0 0 25px rgba(242, 191, 107, 0.08);
+}
+
+.ai-triage-panel.green {
+  border-color: rgba(200, 243, 108, 0.4);
+}
+
+.ai-triage-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px 12px;
+  border-bottom: 1px solid #1c2720;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.ai-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ai-icon-badge {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+  background: #19271e;
+  color: var(--lime);
+  display: grid;
+  place-items: center;
+  border: 1px solid #283d2f;
+}
+
+.ai-header-left h3 {
+  margin: 4px 0 0;
+  color: #e5ece7;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.engine-name-badge {
+  color: var(--lime);
+  font-weight: 700;
+}
+
+.dot-sep {
+  color: var(--dim);
+}
+
+.ai-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ai-engine-selector {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  background: #0d120f;
+  padding: 3px;
+  border-radius: 6px;
+  border: 1px solid #222f26;
+}
+
+.ai-eng-btn {
+  background: transparent;
+  color: #7d8f83;
+  border: none;
+  font: 9px var(--mono);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 140ms ease;
+}
+
+.ai-eng-btn:hover {
+  color: #d1ded6;
+}
+
+.ai-eng-btn.active {
+  background: #19251c;
+  color: var(--lime);
+  font-weight: 700;
+}
+
+.compact-btn {
+  padding: 7px 11px;
+  font-size: 10px;
+}
+
+.ai-key-drawer {
+  padding: 10px 18px;
+  background: #0e1410;
+  border-bottom: 1px solid #1d2720;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.key-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.key-icon {
+  color: var(--amber);
+}
+
+.ai-key-input {
+  flex: 1;
+  background: #151d18;
+  border: 1px solid #28372d;
+  color: #fff;
+  padding: 7px 10px;
+  border-radius: 5px;
+  font: 11px var(--mono);
+}
+
+.ai-key-input:focus {
+  outline: none;
+  border-color: var(--lime);
+}
+
+.key-hint {
+  font: 9px var(--mono);
+  color: #798a7f;
+}
+
+.key-hint code {
+  color: var(--lime);
+  background: #18231c;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+
+.ai-triage-body {
+  padding: 14px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.triage-status-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: #161e19;
+  border: 1px solid #243428;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.triage-status-banner.red {
+  background: #251616;
+  border-color: #552726;
+}
+
+.triage-status-banner.amber {
+  background: #231c12;
+  border-color: #4b361e;
+}
+
+.status-label-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.priority-label {
+  font: 9px var(--mono);
+  color: var(--dim);
+  letter-spacing: 0.08em;
+}
+
+.priority-value {
+  font: 13px var(--mono);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #e5ede7;
+}
+
+.triage-status-banner.red .priority-value {
+  color: #ee7d78;
+}
+
+.triage-status-banner.amber .priority-value {
+  color: var(--amber);
+}
+
+.triage-status-banner.green .priority-value {
+  color: var(--lime);
+}
+
+.triage-pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.triage-pill {
+  font: 9px var(--mono);
+  color: #8c9e92;
+  background: #131a15;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid #243428;
+}
+
+.triage-pill b {
+  color: #dbe4dd;
+}
+
+.triage-details-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.triage-detail-box {
+  background: #0f1411;
+  border: 1px solid #1f2a22;
+  border-radius: 6px;
+  padding: 11px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.triage-detail-box.full-width {
+  grid-column: 1 / -1;
+}
+
+.detail-kicker {
+  font: 8px var(--mono);
+  color: #6a7c70;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.detail-copy {
+  margin: 0;
+  color: #a4b3a9;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.bold-copy {
+  color: #dfe7e1;
+  font-weight: 600;
+}
+
+.plan-copy {
+  color: #c9d7cd;
+  font: 11px var(--mono);
+  line-height: 1.6;
+}
+
+.ai-triage-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 6px;
+  border-top: 1px solid #1a241e;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.footer-note {
+  font-size: 9px;
+  color: #65756a;
+}
+
+.footer-note b {
+  color: #90a195;
+}
+
+@media (max-width: 900px) {
+  .triage-details-grid {
+    grid-template-columns: 1fr;
+  }
+}
