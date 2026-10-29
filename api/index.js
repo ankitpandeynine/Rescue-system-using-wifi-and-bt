@@ -1,5 +1,8 @@
-// Vercel Serverless API Handler for ResQ-Atlas
-// Self-contained cloud inference engine, 3D Wi-Fi Hash Map, and RF sensing state.
+import { createDrishtiCore } from '../server/drishtiCore.mjs'
+
+const drishti = createDrishtiCore()
+
+// Vercel Serverless API Handler for ResQ-Atlas / DRISHTI
 
 function nowIso() {
   return new Date().toISOString()
@@ -588,6 +591,201 @@ export default async function handler(req, res) {
 
     res.setHeader('Content-Type', 'application/json')
     return res.end(JSON.stringify({ ok: true, triage: result, telemetry }))
+  }
+
+  // ============================================================================
+  // DRISHTI v1 REST API
+  // ============================================================================
+  if (pathname === '/api/v1/status') {
+    res.setHeader('Content-Type', 'application/json')
+    return res.end(
+      JSON.stringify({
+        ok: true,
+        name: 'DRISHTI · दृष्टि',
+        tagline: 'Know where people and signals are — never who they are.',
+        hub: {
+          status: 'OK',
+          uptimeS: Math.round(process.uptime()),
+          version: '0.9.0-drishti',
+          memoryMb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        },
+        mode: drishti.modeState.current,
+        incident: drishti.modeState.incident,
+        identifiersStored: drishti.modeState.identifiersStored,
+        devicesOnline: drishti.devices.filter((d) => d.status === 'online').length,
+        devicesTotal: drishti.devices.length,
+        activeLinksCount: 28,
+        aiStatus: {
+          provider: 'cloud-serverless',
+          localAvailable: false,
+          cloudAvailable: Boolean(process.env.GEMINI_API_KEY),
+          privacyGated: true,
+        },
+        storage: {
+          identifiers: 0,
+          activeTracks: drishti.modeState.current === 'INCIDENT' ? 1 : 0,
+          auditLogEntries: drishti.auditLog.length,
+          retentionPolicy: 'Ephemeral TTL + zero personal identifiers',
+        },
+      })
+    )
+  }
+
+  if (pathname === '/api/v1/devices') {
+    res.setHeader('Content-Type', 'application/json')
+    return res.end(
+      JSON.stringify({
+        ok: true,
+        devices: drishti.devices,
+        meshSummary: {
+          nodes: drishti.devices.length,
+          links: 28,
+          channel: 6,
+          busyAirtimePct: 24,
+          avgNoiseDbm: -92,
+        },
+      })
+    )
+  }
+
+  if (pathname === '/api/v1/sites') {
+    res.setHeader('Content-Type', 'application/json')
+    return res.end(JSON.stringify({ ok: true, sites: drishti.sites }))
+  }
+
+  if (pathname === '/api/v1/rf-confirm') {
+    const targetPos = state.presence.estimatedPeople > 0 ? { x: state.spatial.x, y: state.spatial.y } : null
+    const links = drishti.computeRfLinks(targetPos, state.override.active ? state.override.disturbanceLevel : 0.65)
+    const agreedLinks = links.filter((l) => l.inAgreement).length
+    const agreementScore = Number((agreedLinks / (links.length || 1)).toFixed(2))
+    res.setHeader('Content-Type', 'application/json')
+    return res.end(
+      JSON.stringify({
+        ok: true,
+        siteId: 'School-A',
+        rfAgreementScore: agreementScore,
+        tauDb: 6,
+        totalLinks: links.length,
+        agreedLinks,
+        suspectWalls: ['W12', 'W17'],
+        links,
+      })
+    )
+  }
+
+  if (pathname === '/api/v1/pipeline') {
+    res.setHeader('Content-Type', 'application/json')
+    return res.end(JSON.stringify({ ok: true, pipeline: drishti.getPipelineStatus() }))
+  }
+
+  if (pathname === '/api/v1/mode') {
+    res.setHeader('Content-Type', 'application/json')
+    return res.end(
+      JSON.stringify({
+        ok: true,
+        mode: drishti.modeState.current,
+        incident: drishti.modeState.incident,
+        identifiersStored: drishti.modeState.identifiersStored,
+      })
+    )
+  }
+
+  if (pathname === '/api/v1/mode/switch' && req.method === 'POST') {
+    const body = await parseJsonBody(req)
+    const result = drishti.switchMode(body.mode, body.actor || 'operator', body.authContext || {})
+    res.setHeader('Content-Type', 'application/json')
+    return res.end(JSON.stringify({ ok: true, ...result }))
+  }
+
+  if (pathname === '/api/v1/audit') {
+    res.setHeader('Content-Type', 'application/json')
+    return res.end(JSON.stringify({ ok: true, chainLength: drishti.auditLog.length, entries: drishti.auditLog }))
+  }
+
+  if (pathname === '/api/v1/ai/chat' && req.method === 'POST') {
+    const body = await parseJsonBody(req)
+    const message = body.message || ''
+    const facts = drishti.generateStructuredFacts(state.spatial, state.presence, state.room)
+
+    // Privacy red lines check: refuse requests for personal identity or tracking individual phones
+    const lower = message.toLowerCase()
+    if (
+      lower.includes('who is') ||
+      lower.includes('track phone') ||
+      lower.includes('identity') ||
+      lower.includes('mac address') ||
+      lower.includes('name of person') ||
+      lower.includes('follow person')
+    ) {
+      drishti.recordAudit('ai_copilot', 'policy_refusal', { reason: 'Identity or personal tracking requested' })
+      res.setHeader('Content-Type', 'application/json')
+      return res.end(
+        JSON.stringify({
+          ok: true,
+          answer: "I cannot assist with identifying or tracking individuals. DRISHTI's architectural privacy policy strictly forbids deanonymization, MAC tracking, or person identification. I can provide zone-level RF energy, link attenuation, and breathing motion facts.",
+          citedFacts: [],
+          confidence: 'N/A',
+          refused: true,
+        })
+      )
+    }
+
+    const targetFact = facts[0]
+    const answer = `Based on structured facts [${targetFact.fact_id}], Zone ${targetFact.zone} shows ${
+      state.presence.estimatedPeople > 0
+        ? `${state.presence.estimatedPeople} probable occupant disturbance`
+        : 'no significant human-induced RF attenuation'
+    }. RF disturbance index is ${(targetFact.evidence.change_index * 100).toFixed(0)}% with ${(targetFact.blind_spot_fraction * 100).toFixed(0)}% blind spot coverage. Verify on site.`
+    drishti.recordAudit('ai_copilot', 'query', { query: message, factId: targetFact.fact_id })
+    res.setHeader('Content-Type', 'application/json')
+    return res.end(
+      JSON.stringify({
+        ok: true,
+        answer,
+        citedFacts: [targetFact.fact_id],
+        confidence: targetFact.belief.confidence,
+        facts,
+      })
+    )
+  }
+
+  if (pathname === '/api/v1/observatory') {
+    const targetPos = state.presence.estimatedPeople > 0 ? { x: state.spatial.x, y: state.spatial.y } : null
+    const links = drishti.computeRfLinks(targetPos, state.override.active ? state.override.disturbanceLevel : 0.65)
+    res.setHeader('Content-Type', 'application/json')
+    return res.end(
+      JSON.stringify({
+        ok: true,
+        mode: drishti.modeState.current,
+        incident: drishti.modeState.incident,
+        identifiersStored: 0,
+        room: state.room,
+        presence: state.presence,
+        spatial: state.spatial,
+        devices: drishti.devices,
+        links,
+        site: drishti.sites[0],
+        blindSpots: [{ x: 0.8, y: 3.2, z: 0.5, radius: 0.7, reason: 'Low Fresnel link coverage behind W12' }],
+        vitalsGlows:
+          state.presence.estimatedPeople > 0
+            ? [{ x: state.spatial.x, y: state.spatial.y, z: 1.0, bpm: state.presence.breathingBpm || 18, intensity: 0.85 }]
+            : [],
+        emitterBlobs:
+          drishti.modeState.current === 'INCIDENT' && state.presence.estimatedPeople > 0
+            ? [
+                {
+                  id: 'sig-alpha-7b',
+                  x: state.spatial.x,
+                  y: state.spatial.y,
+                  z: 1.2,
+                  uncertaintyRadius: state.spatial.uncertaintyM || 1.1,
+                  rssi: -58,
+                  pseudonym: 'anon-rpa-8c',
+                },
+              ]
+            : [],
+      })
+    )
   }
 
   // 7. SSE Fallback for serverless

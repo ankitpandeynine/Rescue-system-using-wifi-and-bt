@@ -3,6 +3,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { SerialPort } from 'serialport'
+import { createDrishtiCore } from './drishtiCore.mjs'
+
+const drishti = createDrishtiCore()
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REMOTE_WEB_DIR = path.resolve(__dirname, '../remote_controller/build/web')
@@ -2430,6 +2433,206 @@ Output only valid JSON.`
     }
     broadcast('health', publicHealth())
     return sendJson(response, 202, { ok: true, calibration: publicHealth().calibration })
+  }
+
+  // ============================================================================
+  // DRISHTI v1 REST API
+  // ============================================================================
+  if (url.pathname === '/api/v1/status') {
+    return sendJson(response, 200, {
+      ok: true,
+      name: 'DRISHTI · दृष्टि',
+      tagline: 'Know where people and signals are — never who they are.',
+      hub: {
+        status: 'OK',
+        uptimeS: Math.round(process.uptime()),
+        version: '0.9.0-drishti',
+        memoryMb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+      },
+      mode: drishti.modeState.current,
+      incident: drishti.modeState.incident,
+      identifiersStored: drishti.modeState.identifiersStored,
+      devicesOnline: drishti.devices.filter((d) => d.status === 'online').length,
+      devicesTotal: drishti.devices.length,
+      activeLinksCount: 28,
+      aiStatus: {
+        provider: 'local-first',
+        localAvailable: false,
+        cloudAvailable: Boolean(process.env.GEMINI_API_KEY),
+        privacyGated: true,
+      },
+      storage: {
+        identifiers: 0,
+        activeTracks: drishti.modeState.current === 'INCIDENT' ? (state.presence.estimatedPeople > 0 ? 1 : 0) : 0,
+        auditLogEntries: drishti.auditLog.length,
+        retentionPolicy: 'Ephemeral TTL + zero personal identifiers',
+      },
+    })
+  }
+
+  if (url.pathname === '/api/v1/devices') {
+    return sendJson(response, 200, {
+      ok: true,
+      devices: drishti.devices,
+      meshSummary: {
+        nodes: drishti.devices.length,
+        links: 28,
+        channel: 6,
+        busyAirtimePct: 24,
+        avgNoiseDbm: -92,
+      },
+    })
+  }
+
+  if (url.pathname === '/api/v1/devices/config' && request.method === 'POST') {
+    const body = await readJsonBody(request)
+    const dev = drishti.devices.find((d) => d.id === body.id)
+    if (dev) {
+      if (body.role) dev.role = body.role
+      if (body.feeds) dev.feeds = body.feeds
+      if (body.channel) dev.channel = body.channel
+      drishti.recordAudit('operator', 'device.configure', { id: dev.id, role: dev.role })
+    }
+    return sendJson(response, 200, { ok: true, device: dev })
+  }
+
+  if (url.pathname === '/api/v1/sites') {
+    return sendJson(response, 200, {
+      ok: true,
+      sites: drishti.sites,
+    })
+  }
+
+  if (url.pathname === '/api/v1/rf-confirm' && (request.method === 'POST' || request.method === 'GET')) {
+    const body = request.method === 'POST' ? await readJsonBody(request) : {}
+    const siteId = body.siteId || 'School-A'
+    const site = drishti.sites.find((s) => s.id === siteId) || drishti.sites[0]
+    const targetPos = state.presence.estimatedPeople > 0 ? { x: state.spatial.x, y: state.spatial.y } : null
+    const links = drishti.computeRfLinks(targetPos, state.spatial.disturbanceLevel)
+    const agreedLinks = links.filter((l) => l.inAgreement).length
+    const agreementScore = Number((agreedLinks / (links.length || 1)).toFixed(2))
+    site.rfAgreement = agreementScore
+    drishti.recordAudit('operator', 'rf.confirm', { siteId: site.id, agreementScore })
+    return sendJson(response, 200, {
+      ok: true,
+      siteId: site.id,
+      rfAgreementScore: agreementScore,
+      tauDb: 6,
+      totalLinks: links.length,
+      agreedLinks,
+      suspectWalls: site.suspectWalls,
+      links,
+    })
+  }
+
+  if (url.pathname === '/api/v1/pipeline') {
+    return sendJson(response, 200, {
+      ok: true,
+      pipeline: drishti.getPipelineStatus(),
+    })
+  }
+
+  if (url.pathname === '/api/v1/mode') {
+    return sendJson(response, 200, {
+      ok: true,
+      mode: drishti.modeState.current,
+      incident: drishti.modeState.incident,
+      identifiersStored: drishti.modeState.identifiersStored,
+    })
+  }
+
+  if (url.pathname === '/api/v1/mode/switch' && request.method === 'POST') {
+    const body = await readJsonBody(request)
+    const res = drishti.switchMode(body.mode, body.actor || 'operator', body.authContext || {})
+    broadcast('mode_change', res)
+    return sendJson(response, 200, { ok: true, ...res })
+  }
+
+  if (url.pathname === '/api/v1/audit') {
+    return sendJson(response, 200, {
+      ok: true,
+      chainLength: drishti.auditLog.length,
+      entries: drishti.auditLog,
+    })
+  }
+
+  if (url.pathname === '/api/v1/ai/chat' && request.method === 'POST') {
+    const body = await readJsonBody(request)
+    const message = body.message || ''
+    const facts = drishti.generateStructuredFacts(state.spatial, state.presence, state.room)
+
+    // Privacy red lines check: refuse requests for personal identity or tracking individual phones
+    const lower = message.toLowerCase()
+    if (
+      lower.includes('who is') ||
+      lower.includes('track phone') ||
+      lower.includes('identity') ||
+      lower.includes('mac address') ||
+      lower.includes('name of person') ||
+      lower.includes('follow person')
+    ) {
+      drishti.recordAudit('ai_copilot', 'policy_refusal', { reason: 'Identity or personal tracking requested' })
+      return sendJson(response, 200, {
+        ok: true,
+        answer: "I cannot assist with identifying or tracking individuals. DRISHTI's architectural privacy policy strictly forbids deanonymization, MAC tracking, or person identification. I can provide zone-level RF energy, link attenuation, and breathing motion facts.",
+        citedFacts: [],
+        confidence: 'N/A',
+        refused: true,
+      })
+    }
+
+    const targetFact = facts[0]
+    const answer = `Based on structured facts [${targetFact.fact_id}], Zone ${targetFact.zone} shows ${
+      state.presence.estimatedPeople > 0
+        ? `${state.presence.estimatedPeople} probable occupant disturbance with ${state.presence.breathingBpm ? `${state.presence.breathingBpm} BPM respiration` : 'active movement'}`
+        : 'no significant human-induced RF attenuation'
+    }. RF disturbance index is ${(targetFact.evidence.change_index * 100).toFixed(0)}% with ${(targetFact.blind_spot_fraction * 100).toFixed(0)}% blind spot coverage. Verify on site.`
+    drishti.recordAudit('ai_copilot', 'query', { query: message, factId: targetFact.fact_id })
+    return sendJson(response, 200, {
+      ok: true,
+      answer,
+      citedFacts: [targetFact.fact_id],
+      confidence: targetFact.belief.confidence,
+      facts,
+    })
+  }
+
+  if (url.pathname === '/api/v1/observatory') {
+    const targetPos = state.presence.estimatedPeople > 0 ? { x: state.spatial.x, y: state.spatial.y } : null
+    const links = drishti.computeRfLinks(targetPos, state.spatial.disturbanceLevel)
+    return sendJson(response, 200, {
+      ok: true,
+      mode: drishti.modeState.current,
+      incident: drishti.modeState.incident,
+      identifiersStored: 0,
+      room: state.room,
+      presence: state.presence,
+      spatial: state.spatial,
+      devices: drishti.devices,
+      links,
+      site: drishti.sites[0],
+      blindSpots: [
+        { x: 0.8, y: 3.2, z: 0.5, radius: 0.7, reason: 'Low Fresnel link coverage behind W12' },
+      ],
+      vitalsGlows:
+        state.presence.estimatedPeople > 0
+          ? [{ x: state.spatial.x, y: state.spatial.y, z: 1.0, bpm: state.presence.breathingBpm || 18, intensity: 0.85 }]
+          : [],
+      emitterBlobs:
+        drishti.modeState.current === 'INCIDENT' && state.presence.estimatedPeople > 0
+          ? [
+              {
+                id: 'sig-alpha-7b',
+                x: state.spatial.x,
+                y: state.spatial.y,
+                z: 1.2,
+                uncertaintyRadius: state.spatial.uncertaintyM || 1.1,
+                rssi: -58,
+                pseudonym: 'anon-rpa-8c',
+              },
+            ]
+          : [],
+    })
   }
 
   if (url.pathname === '/api/stream') {
